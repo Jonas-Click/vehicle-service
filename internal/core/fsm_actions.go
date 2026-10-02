@@ -820,6 +820,8 @@ func (v *VehicleSystem) ExitAtRest(c *librefsm.Context) error {
 	v.autoStandbyDeadline = time.Time{}
 	v.keylessCountdownActive = false
 	v.mu.Unlock()
+	// Leaving the parked family ends any hold-to-lock countdown.
+	v.cancelHandlebarAutoLock()
 	return nil
 }
 

@@ -146,6 +146,14 @@ type VehicleSystem struct {
 	hopOnLockedHandlebar bool
 	autoStandbyDeadline  time.Time // Live auto-standby deadline (set by EnterAtRest, cleared by ExitAtRest)
 
+	// Handlebar hold-to-lock. handlebarAutoLockSeconds is the
+	// scooter.handlebar-auto-lock-seconds setting (0 = disabled);
+	// handlebarAutoLockTimer is armed on an off-place -> on-place edge while
+	// parked and fires fsm.EvLock if the rider keeps holding. Guarded by mu.
+	handlebarAutoLockSeconds  int
+	handlebarAutoLockTimer    *time.Timer
+	handlebarAutoLockDeadline time.Time
+
 	// steeringLockPending records that a declined boot restore left the
 	// steering unlocked. It is set during the restore and consumed once, later
 	// in Start(). Both happen on the Start() goroutine before anything else can
@@ -155,19 +163,20 @@ type VehicleSystem struct {
 
 func NewVehicleSystem(io HardwareIO, redis MessagingClient, l *logger.Logger) *VehicleSystem {
 	vs := &VehicleSystem{
-		state:                   types.StateStandby,
-		logger:                  l.WithTag("Vehicle"),
-		io:                      io,
-		redis:                   redis,
-		initialized:             false,
-		keycardTapCount:         0,
-		brakeHibernationEnabled: true,   // Default to enabled for backward compatibility
-		hornEnableMode:          "true", // Default to always enabled for backward compatibility
-		hornWhenSeatboxOpen:     false,  // Default: mute manual horn while seatbox open in unlocked states
-		openSeatboxOnUnlock:     false,  // Default: leave the seatbox alone on unlock
-		seatboxClosed:           true,   // Safe default until first sensor read (closed = no suppression)
-		usb0Policy:              "auto", // Default: bring usb0 down in standby; setPower tracks dashboard_power
-		background:              func(f func()) { go f() },
+		state:                    types.StateStandby,
+		logger:                   l.WithTag("Vehicle"),
+		io:                       io,
+		redis:                    redis,
+		initialized:              false,
+		keycardTapCount:          0,
+		brakeHibernationEnabled:  true,   // Default to enabled for backward compatibility
+		hornEnableMode:           "true", // Default to always enabled for backward compatibility
+		hornWhenSeatboxOpen:      false,  // Default: mute manual horn while seatbox open in unlocked states
+		openSeatboxOnUnlock:      false,  // Default: leave the seatbox alone on unlock
+		seatboxClosed:            true,   // Safe default until first sensor read (closed = no suppression)
+		usb0Policy:               "auto", // Default: bring usb0 down in standby; setPower tracks dashboard_power
+		handlebarAutoLockSeconds: defaultHandlebarAutoLockSeconds,
+		background:               func(f func()) { go f() },
 	}
 	vs.blinkerCueIndex.Store(-1)
 	vs.gestures = newGestureDetector(func(event string) {
@@ -296,6 +305,29 @@ func (v *VehicleSystem) Start() error {
 		}
 	} else {
 		v.logger.Infof("No auto-standby setting found on startup, using default (%d seconds)", defaultAutoStandbySeconds)
+	}
+
+	// Read the handlebar hold-to-lock setting. The struct is already seeded
+	// with defaultHandlebarAutoLockSeconds at construction; this only
+	// overrides it when the settings hash has something usable.
+	if setting, err := v.redis.GetHashField("settings", handlebarAutoLockSettingKey); err != nil {
+		v.logger.Warnf("Failed to read %s on startup: %v (using default %d s)", handlebarAutoLockSettingKey, err, defaultHandlebarAutoLockSeconds)
+	} else if setting != "" {
+		if seconds, parseErr := strconv.Atoi(setting); parseErr != nil {
+			v.logger.Warnf("Invalid %s value on startup: '%s', using default (%d)", handlebarAutoLockSettingKey, setting, defaultHandlebarAutoLockSeconds)
+		} else {
+			clamped := v.clampHandlebarAutoLock(seconds)
+			v.mu.Lock()
+			v.handlebarAutoLockSeconds = clamped
+			v.mu.Unlock()
+			if clamped > 0 {
+				v.logger.Infof("Handlebar auto-lock setting on startup: %d seconds", clamped)
+			} else {
+				v.logger.Infof("Handlebar auto-lock setting on startup: disabled")
+			}
+		}
+	} else {
+		v.logger.Infof("No %s setting found on startup, using default (%d seconds)", handlebarAutoLockSettingKey, defaultHandlebarAutoLockSeconds)
 	}
 
 	v.mu.Lock()
@@ -595,6 +627,11 @@ func (v *VehicleSystem) Start() error {
 				v.mu.Lock()
 				v.seatboxClosed = value
 				v.mu.Unlock()
+				// The lid coming open ends any hold-to-lock countdown: the
+				// lock would only defer into waiting-seatbox.
+				if !value {
+					v.cancelHandlebarAutoLock()
+				}
 				// Update Redis
 				if err := v.redis.SetSeatboxLockState(value); err != nil {
 					return err
@@ -1188,6 +1225,8 @@ func (v *VehicleSystem) handleInputChange(channel string, value bool) error {
 
 		// Reset auto-standby timer on kickstand movement
 		v.resetAutoStandbyTimer()
+		// Moving the kickstand abandons the hold-to-lock gesture.
+		v.cancelHandlebarAutoLock()
 
 		// Update Redis (skip in standby to avoid noise)
 		if currentState != types.StateStandby {
@@ -1245,6 +1284,8 @@ func (v *VehicleSystem) handleInputChange(channel string, value bool) error {
 		if value {
 			// Reset auto-standby timer on seatbox press
 			v.resetAutoStandbyTimer()
+			// Pressing the button means the rider wants the seatbox, not a lock.
+			v.cancelHandlebarAutoLock()
 			// Send physical event - FSM handles seatbox opening via OnSeatboxButton action
 			v.logger.Infof("Seatbox button pressed - sending EvSeatboxButton")
 			v.machine.Send(librefsm.Event{ID: fsm.EvSeatboxButton})
@@ -1276,6 +1317,8 @@ func (v *VehicleSystem) handleInputChange(channel string, value bool) error {
 
 		if eitherBrakePressed {
 			v.resetAutoStandbyTimer()
+			// A brake means the rider is about to ride, not lock.
+			v.cancelHandlebarAutoLock()
 		}
 
 		// Menu navigation taps skip the on-cue on a parked scooter. The off-cue

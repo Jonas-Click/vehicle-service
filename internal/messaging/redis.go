@@ -761,6 +761,18 @@ func (r *RedisClient) ClearAutoStandbyDeadline() error {
 	return r.vehiclePub.Delete("auto-standby-deadline")
 }
 
+// PublishAutoLockDeadline publishes when the handlebar hold-to-lock countdown
+// will fire, as a Unix timestamp. The dashboard renders its own overlay from
+// this, distinct from the idle auto-standby countdown.
+func (r *RedisClient) PublishAutoLockDeadline(deadline time.Time) error {
+	return r.vehiclePub.Set("auto-lock-deadline", deadline.Unix())
+}
+
+// ClearAutoLockDeadline removes the auto-lock deadline.
+func (r *RedisClient) ClearAutoLockDeadline() error {
+	return r.vehiclePub.Delete("auto-lock-deadline")
+}
+
 // PublishGovernorChange publishes a governor change event to Redis
 func (r *RedisClient) PublishGovernorChange(governor string) error {
 	r.logger.Debugf("Publishing governor change: %s", governor)

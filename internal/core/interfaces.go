@@ -53,6 +53,10 @@ type MessagingClient interface {
 	PublishAutoStandbyDeadline(deadline time.Time) error
 	ClearAutoStandbyDeadline() error
 
+	// Handlebar hold-to-lock countdown (published for the dashboard overlay).
+	PublishAutoLockDeadline(deadline time.Time) error
+	ClearAutoLockDeadline() error
+
 	// Sensors and switches
 	SetBrakeState(side string, pressed bool) error
 	SetKickstandState(deployed bool) error

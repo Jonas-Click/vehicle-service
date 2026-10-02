@@ -12,6 +12,12 @@ state and commands through Redis.
 - Controls vehicle GPIO for power, braking, locks, horn, seatbox, and inputs.
 - Drives the PWM LED channels used for lighting and indicators.
 - Processes handlebar, brake, seatbox, kickstand, and button input events.
+- Locks on a handlebar hold-to-lock gesture: holding the handlebar at full
+  left while parked, with the seatbox closed and the scooter stopped, arms a
+  short countdown (`scooter.handlebar-auto-lock-seconds`, default 3 s, 0
+  disables) and then locks. Releasing the handlebar or touching a brake,
+  kickstand, or seatbox button cancels it. The countdown deadline is published
+  as `auto-lock-deadline` on the `vehicle` hash for the dashboard overlay.
 - Publishes vehicle state, input events, and faults for other vehicle services.
 
 ## Operation and Redis interface

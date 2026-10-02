@@ -49,6 +49,8 @@ type mockMessagingClient struct {
 	restoreAttemptClears   int
 	faultCalls             []faultCall
 	removedInhibitors      []string
+	autoLockDeadlines      []int64
+	autoLockDeadlineClears int
 
 	// Return values
 	vehicleState      types.SystemState
@@ -149,12 +151,24 @@ func (m *mockMessagingClient) RecordDbcLink(transport string, usbUp, pppUp bool,
 }
 func (m *mockMessagingClient) PublishAutoStandbyDeadline(deadline time.Time) error { return nil }
 func (m *mockMessagingClient) ClearAutoStandbyDeadline() error                     { return nil }
-func (m *mockMessagingClient) SetKickstandState(deployed bool) error               { return nil }
-func (m *mockMessagingClient) SetHandlebarLockState(locked bool) error             { return nil }
-func (m *mockMessagingClient) SetHandlebarLockLatched(locked bool) error           { return nil }
-func (m *mockMessagingClient) SetSeatboxLockState(locked bool) error               { return nil }
-func (m *mockMessagingClient) SetHornButton(pressed bool) error                    { return nil }
-func (m *mockMessagingClient) SetSeatboxButton(pressed bool) error                 { return nil }
+func (m *mockMessagingClient) PublishAutoLockDeadline(deadline time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.autoLockDeadlines = append(m.autoLockDeadlines, deadline.Unix())
+	return nil
+}
+func (m *mockMessagingClient) ClearAutoLockDeadline() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.autoLockDeadlineClears++
+	return nil
+}
+func (m *mockMessagingClient) SetKickstandState(deployed bool) error     { return nil }
+func (m *mockMessagingClient) SetHandlebarLockState(locked bool) error   { return nil }
+func (m *mockMessagingClient) SetHandlebarLockLatched(locked bool) error { return nil }
+func (m *mockMessagingClient) SetSeatboxLockState(locked bool) error     { return nil }
+func (m *mockMessagingClient) SetHornButton(pressed bool) error          { return nil }
+func (m *mockMessagingClient) SetSeatboxButton(pressed bool) error       { return nil }
 func (m *mockMessagingClient) SetMainPower(on bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

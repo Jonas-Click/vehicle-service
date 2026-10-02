@@ -536,6 +536,28 @@ func (v *VehicleSystem) handleSettingsUpdate(settingKey string) error {
 			}
 		}
 
+	case handlebarAutoLockSettingKey:
+		value, err := v.redis.GetHashField("settings", settingKey)
+		if err != nil {
+			v.logger.Infof("Failed to read setting %s: %v", settingKey, err)
+			return err
+		}
+		seconds, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			v.logger.Warnf("Invalid %s value: '%s'", settingKey, value)
+			return fmt.Errorf("invalid %s value: %s", settingKey, value)
+		}
+		clamped := v.clampHandlebarAutoLock(seconds)
+		v.mu.Lock()
+		v.handlebarAutoLockSeconds = clamped
+		v.mu.Unlock()
+		if clamped > 0 {
+			v.logger.Infof("Handlebar auto-lock enabled via settings update: %d seconds", clamped)
+		} else {
+			v.logger.Infof("Handlebar auto-lock disabled via settings update")
+			v.cancelHandlebarAutoLock()
+		}
+
 	case "scooter.lock-on-bluetooth-disconnect-seconds":
 		value, err := v.redis.GetHashField("settings", settingKey)
 		if err != nil {

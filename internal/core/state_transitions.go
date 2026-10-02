@@ -329,6 +329,9 @@ func (v *VehicleSystem) handleHandlebarPosition(channel string, value bool) erro
 	}
 
 	if !value {
+		// The handlebar left the lock detent: the rider is not asking to
+		// lock, so drop any hold countdown that was running.
+		v.cancelHandlebarAutoLock()
 		return nil // Only care about activation
 	}
 
@@ -351,7 +354,13 @@ func (v *VehicleSystem) handleHandlebarPosition(channel string, value bool) erro
 
 	if !unlocked {
 		v.unlockHandlebar()
+		return nil
 	}
+
+	// Unlocked and now held at the lock detent: this is the auto-lock
+	// gesture. armHandlebarAutoLock re-checks the parked state, seatbox,
+	// setting and speed, so the ready-to-drive case simply falls through.
+	v.armHandlebarAutoLock()
 
 	return nil
 }
