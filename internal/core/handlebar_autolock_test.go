@@ -21,7 +21,7 @@ func autoLockSystem(t *testing.T, state librefsm.StateID) (*VehicleSystem, *mock
 	initTestFSM(t, v)
 	t.Cleanup(func() {
 		v.cancelHandlebarAutoLock()
-		v.machine.Stop()
+		_ = v.machine.Stop()
 		v.cancelHandlebarLock()
 		v.cancelHandlebarUnlock()
 	})
