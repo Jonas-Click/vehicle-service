@@ -485,6 +485,10 @@ func newTestVehicleSystem() (*VehicleSystem, *mockHardwareIO, *mockMessagingClie
 	system := NewVehicleSystem(mockIO, mockRedis, l)
 	// Run background work inline so a test observes the record deterministically.
 	system.background = func(f func()) { f() }
+	// Put the boot grace window in the past: unit tests drive the input
+	// callbacks directly and are not the boot-time settling it guards against.
+	// The grace tests set this explicitly.
+	system.handlebarAutoLockGraceUntil = time.Now().Add(-time.Second)
 	return system, mockIO, mockRedis
 }
 

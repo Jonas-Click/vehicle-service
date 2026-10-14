@@ -34,6 +34,17 @@ const (
 	// considered stopped. The ECU reports km/h with quantization noise around
 	// zero, so an exact zero comparison would never be satisfied.
 	handlebarAutoLockSpeedThresholdKmh = 0.5
+	// handlebarAutoLockBootGrace is how long after the service starts the
+	// hold-to-lock gesture is disabled. At boot the input device is opened and
+	// re-synced, the FSM state is restored and the pad driver settles: on this
+	// board every input is materialised and any settling edge is delivered
+	// within a couple of seconds of the input device opening. A genuine edge
+	// sequence produced by that settling (release then press on an unmoved
+	// switch) is indistinguishable from a rider holding the lever, so the
+	// gesture is suppressed for a window comfortably longer than the whole
+	// hardware-init + input-settle sequence. This is belt-and-braces on top of
+	// the off-place requirement in armHandlebarAutoLock.
+	handlebarAutoLockBootGrace = 15 * time.Second
 )
 
 // handlebarAutoLockSettingKey is the settings-hash field for the hold time.
@@ -65,9 +76,18 @@ func (v *VehicleSystem) armHandlebarAutoLock() {
 	override := v.handlebarUnlockedOverride
 	unlocked := v.handlebarUnlocked
 	sawOffPlace := v.handlebarAutoLockSawOffPlace
+	graceUntil := v.handlebarAutoLockGraceUntil
 	v.mu.RUnlock()
 
 	if seconds <= 0 || override || !unlocked {
+		return
+	}
+	// The input layer settles after boot: a switch can present a release/press
+	// edge sequence without the rider moving it, which looks exactly like the
+	// gesture. Refuse to arm for a short window after start; this is
+	// belt-and-braces on top of the off-place requirement below.
+	if time.Now().Before(graceUntil) {
+		v.logger.Debugf("Handlebar auto-lock: within boot grace period, not arming")
 		return
 	}
 	// The input layer replays the current key state when the input device is

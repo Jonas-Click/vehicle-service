@@ -326,3 +326,39 @@ func TestHandlebarAutoLock_ArmsAfterObservedOffPlace(t *testing.T) {
 	v.handlebarAutoLockExpired()
 	waitForState(t, v, fsm.StateShuttingDown, 2*time.Second)
 }
+
+// Even a genuine off-place -> on-place sequence must not arm while the input
+// layer is still settling after boot.
+func TestHandlebarAutoLock_DoesNotArmDuringBootGrace(t *testing.T) {
+	v, _, redis := autoLockSystem(t, fsm.StateParked)
+	v.mu.Lock()
+	v.handlebarAutoLockGraceUntil = time.Now().Add(handlebarAutoLockBootGrace)
+	v.mu.Unlock()
+
+	holdHandlebarAtDetent(t, v)
+	if autoLockArmed(v) {
+		t.Fatal("a gesture inside the boot grace window must not arm the countdown")
+	}
+	if n := autoLockDeadlineCount(redis); n != 0 {
+		t.Fatalf("no deadline must be published, got %d", n)
+	}
+}
+
+// The identical gesture after the grace window arms and fires normally.
+func TestHandlebarAutoLock_ArmsAfterBootGrace(t *testing.T) {
+	v, _, redis := autoLockSystem(t, fsm.StateParked)
+	v.mu.Lock()
+	v.handlebarAutoLockGraceUntil = time.Now().Add(-time.Second)
+	v.mu.Unlock()
+
+	holdHandlebarAtDetent(t, v)
+	if !autoLockArmed(v) {
+		t.Fatal("a gesture after the boot grace window must arm the countdown")
+	}
+	if n := autoLockDeadlineCount(redis); n != 1 {
+		t.Fatalf("expected one published auto-lock deadline, got %d", n)
+	}
+
+	v.handlebarAutoLockExpired()
+	waitForState(t, v, fsm.StateShuttingDown, 2*time.Second)
+}

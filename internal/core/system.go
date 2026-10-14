@@ -158,7 +158,11 @@ type VehicleSystem struct {
 	// the on-place state cannot arm the countdown (see handleHandlebarPosition
 	// and armHandlebarAutoLock). Guarded by mu.
 	handlebarAutoLockSawOffPlace bool
-	handlebarAutoLockDeadline    time.Time
+	// handlebarAutoLockGraceUntil is the instant before which the gesture is
+	// suppressed while the input layer settles after boot. Set once at
+	// construction; tests set it directly. Guarded by mu.
+	handlebarAutoLockGraceUntil time.Time
+	handlebarAutoLockDeadline   time.Time
 
 	// steeringLockPending records that a declined boot restore left the
 	// steering unlocked. It is set during the restore and consumed once, later
@@ -182,7 +186,9 @@ func NewVehicleSystem(io HardwareIO, redis MessagingClient, l *logger.Logger) *V
 		seatboxClosed:            true,   // Safe default until first sensor read (closed = no suppression)
 		usb0Policy:               "auto", // Default: bring usb0 down in standby; setPower tracks dashboard_power
 		handlebarAutoLockSeconds: defaultHandlebarAutoLockSeconds,
-		background:               func(f func()) { go f() },
+		// Suppress the gesture while the input layer settles after boot.
+		handlebarAutoLockGraceUntil: time.Now().Add(handlebarAutoLockBootGrace),
+		background:                  func(f func()) { go f() },
 	}
 	vs.blinkerCueIndex.Store(-1)
 	vs.gestures = newGestureDetector(func(event string) {
