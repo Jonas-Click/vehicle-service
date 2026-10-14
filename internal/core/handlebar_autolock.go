@@ -64,9 +64,19 @@ func (v *VehicleSystem) armHandlebarAutoLock() {
 	seconds := v.handlebarAutoLockSeconds
 	override := v.handlebarUnlockedOverride
 	unlocked := v.handlebarUnlocked
+	sawOffPlace := v.handlebarAutoLockSawOffPlace
 	v.mu.RUnlock()
 
 	if seconds <= 0 || override || !unlocked {
+		return
+	}
+	// The input layer replays the current key state when the input device is
+	// opened at boot, so an on-place reading can arrive during startup without
+	// the rider having moved the handlebar (it is simply parked at full left).
+	// Only a genuine off-place -> on-place transition may arm, so require an
+	// off-place reading to have been observed at runtime first.
+	if !sawOffPlace {
+		v.logger.Debugf("Handlebar auto-lock: on-place with no observed off-place (boot replay), not arming")
 		return
 	}
 	if v.getCurrentStateID() != fsm.StateParked {

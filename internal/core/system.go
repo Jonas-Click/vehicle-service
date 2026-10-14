@@ -151,9 +151,14 @@ type VehicleSystem struct {
 	// scooter.handlebar-auto-lock-seconds setting (0 = disabled);
 	// handlebarAutoLockTimer is armed on an off-place -> on-place edge while
 	// parked and fires fsm.EvLock if the rider keeps holding. Guarded by mu.
-	handlebarAutoLockSeconds  int
-	handlebarAutoLockTimer    *time.Timer
-	handlebarAutoLockDeadline time.Time
+	handlebarAutoLockSeconds int
+	handlebarAutoLockTimer   *time.Timer
+	// handlebarAutoLockSawOffPlace latches once an off-place handlebar reading
+	// has been observed at runtime. It gates arming, so a boot-time replay of
+	// the on-place state cannot arm the countdown (see handleHandlebarPosition
+	// and armHandlebarAutoLock). Guarded by mu.
+	handlebarAutoLockSawOffPlace bool
+	handlebarAutoLockDeadline    time.Time
 
 	// steeringLockPending records that a declined boot restore left the
 	// steering unlocked. It is set during the restore and consumed once, later

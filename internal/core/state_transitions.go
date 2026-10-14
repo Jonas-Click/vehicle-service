@@ -331,6 +331,16 @@ func (v *VehicleSystem) handleHandlebarPosition(channel string, value bool) erro
 	if !value {
 		// The handlebar left the lock detent: the rider is not asking to
 		// lock, so drop any hold countdown that was running.
+		//
+		// Seeing the lever off the detent is also what makes a later on-place
+		// meaningful. The input layer reproduces the current key state when the
+		// input device is opened at boot, so an on-place reading arriving
+		// before any off-place is not a transition: it is just the handlebar
+		// sitting in its parked/locked position. Latch the observation so the
+		// arming guard in armHandlebarAutoLock can tell the two apart.
+		v.mu.Lock()
+		v.handlebarAutoLockSawOffPlace = true
+		v.mu.Unlock()
 		v.cancelHandlebarAutoLock()
 		return nil // Only care about activation
 	}

@@ -37,6 +37,21 @@ func autoLockArmed(v *VehicleSystem) bool {
 	return v.handlebarAutoLockTimer != nil
 }
 
+// holdHandlebarAtDetent performs the genuine off-place -> on-place gesture the
+// countdown is edge-triggered on. Tests that expect the countdown to arm go
+// through this rather than calling handleHandlebarPosition(true) directly, so
+// they exercise the real transition and are not defeated by the guard that
+// ignores a boot-time on-place replay.
+func holdHandlebarAtDetent(t *testing.T, v *VehicleSystem) {
+	t.Helper()
+	if err := v.handleHandlebarPosition("handlebar_position", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func autoLockDeadlineCount(redis *mockMessagingClient) int {
 	redis.mu.Lock()
 	defer redis.mu.Unlock()
@@ -64,9 +79,7 @@ func waitForState(t *testing.T, v *VehicleSystem, want librefsm.StateID, timeout
 func TestHandlebarAutoLock_ArmsWhenParkedAndClosed(t *testing.T) {
 	v, _, redis := autoLockSystem(t, fsm.StateParked)
 
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("expected the hold countdown to be armed")
 	}
@@ -125,6 +138,9 @@ func TestHandlebarAutoLock_DoesNotArm(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(t, v, io, redis)
 			}
+			if err := v.handleHandlebarPosition("handlebar_position", false); err != nil {
+				t.Fatal(err)
+			}
 			if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
 				t.Fatal(err)
 			}
@@ -144,9 +160,7 @@ func TestHandlebarAutoLock_DoesNotArmWhenAlreadyLocked(t *testing.T) {
 	v, io, redis := autoLockSystem(t, fsm.StateParked)
 	io.setDigitalInput("handlebar_lock_sensor", false) // locked
 
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if autoLockArmed(v) {
 		t.Fatal("countdown must not arm while the handlebar is locked")
 	}
@@ -159,9 +173,7 @@ func TestHandlebarAutoLock_ZeroSpeedStillArms(t *testing.T) {
 	v, _, redis := autoLockSystem(t, fsm.StateParked)
 	redis.hashFields = map[string]string{"engine-ecu/speed": "0.0"}
 
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("a stopped engine-ECU reading must still arm")
 	}
@@ -169,9 +181,7 @@ func TestHandlebarAutoLock_ZeroSpeedStillArms(t *testing.T) {
 
 func TestHandlebarAutoLock_CancelOnHandlebarRelease(t *testing.T) {
 	v, _, redis := autoLockSystem(t, fsm.StateParked)
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("precondition: expected armed")
 	}
@@ -191,9 +201,7 @@ func TestHandlebarAutoLock_CancelOnRiderInput(t *testing.T) {
 	for _, channel := range []string{"brake_left", "kickstand", "seatbox_button"} {
 		t.Run(channel, func(t *testing.T) {
 			v, io, redis := autoLockSystem(t, fsm.StateParked)
-			if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-				t.Fatal(err)
-			}
+			holdHandlebarAtDetent(t, v)
 			if !autoLockArmed(v) {
 				t.Fatal("precondition: expected armed")
 			}
@@ -215,9 +223,7 @@ func TestHandlebarAutoLock_CancelOnRiderInput(t *testing.T) {
 
 func TestHandlebarAutoLock_CancelWhenDisabledBySetting(t *testing.T) {
 	v, _, redis := autoLockSystem(t, fsm.StateParked)
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("precondition: expected armed")
 	}
@@ -236,9 +242,7 @@ func TestHandlebarAutoLock_ExpiryLocks(t *testing.T) {
 	// The handlebar is physically held at the detent when the countdown fires.
 	io.setDigitalInput("handlebar_position", true)
 
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("precondition: expected armed")
 	}
@@ -262,9 +266,7 @@ func TestHandlebarAutoLock_TimerFires(t *testing.T) {
 	v.handlebarAutoLockSeconds = 1
 	v.mu.Unlock()
 
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("precondition: expected armed")
 	}
@@ -275,9 +277,7 @@ func TestHandlebarAutoLock_TimerFires(t *testing.T) {
 // Leaving the parked family cancels an armed countdown.
 func TestHandlebarAutoLock_CancelOnLeavingParked(t *testing.T) {
 	v, _, redis := autoLockSystem(t, fsm.StateParked)
-	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
-		t.Fatal(err)
-	}
+	holdHandlebarAtDetent(t, v)
 	if !autoLockArmed(v) {
 		t.Fatal("precondition: expected armed")
 	}
@@ -291,4 +291,38 @@ func TestHandlebarAutoLock_CancelOnLeavingParked(t *testing.T) {
 	if autoLockClearCount(redis) == 0 {
 		t.Fatal("expected the published deadline to be cleared")
 	}
+}
+
+// The input layer replays the current key state when the device is opened at
+// boot, so an on-place reading can arrive during startup while the handlebar
+// is simply parked at full left. With no off-place ever observed at runtime
+// there is no transition, so the countdown must not arm.
+func TestHandlebarAutoLock_IgnoresBootReplayWithoutOffPlace(t *testing.T) {
+	v, _, redis := autoLockSystem(t, fsm.StateParked)
+
+	if err := v.handleHandlebarPosition("handlebar_position", true); err != nil {
+		t.Fatal(err)
+	}
+	if autoLockArmed(v) {
+		t.Fatal("a boot-time on-place replay must not arm the countdown")
+	}
+	if n := autoLockDeadlineCount(redis); n != 0 {
+		t.Fatalf("no deadline must be published, got %d", n)
+	}
+}
+
+// A genuine off-place -> on-place sequence still arms and fires.
+func TestHandlebarAutoLock_ArmsAfterObservedOffPlace(t *testing.T) {
+	v, _, redis := autoLockSystem(t, fsm.StateParked)
+
+	holdHandlebarAtDetent(t, v)
+	if !autoLockArmed(v) {
+		t.Fatal("a genuine off-place -> on-place must arm the countdown")
+	}
+	if n := autoLockDeadlineCount(redis); n != 1 {
+		t.Fatalf("expected one published auto-lock deadline, got %d", n)
+	}
+
+	v.handlebarAutoLockExpired()
+	waitForState(t, v, fsm.StateShuttingDown, 2*time.Second)
 }
